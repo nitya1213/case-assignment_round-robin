@@ -1,485 +1,131 @@
-Absolutely — here is a **complete, production-ready README.md** that includes **EVERYTHING** you need:
-
-* directory structure
-* installation
-* Google Sheets setup
-* Apps Script setup
-* Python setup
-* how to run
-* what output looks like
-* troubleshooting
-
-You can **copy–paste this entire thing** into a README.md file.
-
+# :rocket: Case Assignment Bot
+The Case Assignment Bot is an automation tool that assigns open cases to active employees using a round-robin algorithm, updates a Google Sheet, and sends an email notification to each assigned employee.
+It is designed for lightweight support operations, helpdesks, and customer service teams that track their cases in Google Sheets.
 ---
-
-# README.md
-
-# 🚀 Case Assignment Automation System
-
-Automated case assignment + email notification system using **Google Sheets**, **Google Apps Script**, and **Python**.
-
+## :drawing_pin: Key Features
+* **Round-robin case assignment**
+* **Google Sheets as the data source**
+* **Google Apps Script Web App as the API**
+* **Auto-updates assignments in Google Sheets**
+* **Email notifications sent automatically**
+* **Simple configuration using a `.env` file**
+* **Runs via Python or a bundled `run.sh` helper script**
 ---
-
-# 📌 Overview
-
-This project automates a customer support workflow:
-
-1. **Fetch employee roster** from Google Sheets
-2. **Fetch open cases** from Google Sheets
-3. **Assign unassigned open cases** using a **round-robin algorithm**
-4. **Update assignments back into Google Sheets**
-5. **Send an email notification** to each employee assigned a new case
-
-It uses:
-
-* **Google Apps Script Web App** = API endpoint
-* **Google Sheets** = data store
-* **Python Script** = processing + email sending
-
+## :hammer_and_spanner: How It Works
+The system uses three components working together:
+### :one: Google Sheets
+Two sheets inside the same spreadsheet:
+* **Roster**
+  Contains employee list + email + active status
+* **Case Tracker**
+  Contains cases that may be Open/Closed + optional Assignee field
+### :two: Google Apps Script Web App
+Acts as a tiny backend API that:
+* Returns sheet data as JSON (`GET`)
+* Accepts updates for assigned cases (`POST`)
+### :three: Python Script
+Fetches data from the Web App and:
+* Finds all active employees
+* Finds unassigned open cases
+* Assigns them fairly (round-robin)
+* Sends email notifications
+* Pushes assigned values back to Google Sheets
 ---
-
-# 📁 Directory Structure
-
-Create the following directory:
-
+## :cog: Project Structure
 ```
 case-assignment-bot/
-├── .env                  # Environment variables
-├── requirements.txt      # Python dependencies
-└── assign_cases.py       # Main script
+├── assign_cases.py     # Main logic
+├── run.sh              # Helper script for running the bot
+├── requirements.txt    # Python dependencies
+├── .env                # API URL + email credentials
+└── .gitignore
 ```
-
 ---
-
-# 🛠️ Installation (Ubuntu 24)
-
-## 1. Install Python + Tools
-
-```bash
-sudo apt update
-sudo apt install -y python3 python3-pip python3-venv
+## :spanner: Configuration
+Place your configuration inside `.env`:
 ```
-
-## 2. Create Project Folder
-
-```bash
-mkdir -p ~/case-assignment-bot
-cd ~/case-assignment-bot
-```
-
-## 3. Create & Activate Virtual Environment
-
-```bash
-python3 -m venv venv
-source venv/bin/activate
-```
-
-## 4. Create `requirements.txt`
-
-```bash
-cat > requirements.txt << 'EOF'
-requests
-python-dotenv
-EOF
-```
-
-Install packages:
-
-```bash
-pip install -r requirements.txt
-```
-
----
-
-# 🧾 Google Sheets Setup
-
-Open Google Sheets and create a new spreadsheet.
-
-## 1. Create **Roster** Sheet
-
-Rename Sheet1 → `Roster`
-
-Header row:
-
-| Employee Name | Email | Active |
-| ------------- | ----- | ------ |
-
-Example rows:
-
-| Employee Name | Email                                     | Active |
-| ------------- | ----------------------------------------- | ------ |
-| Alice         | [alice@email.com](mailto:alice@email.com) | Yes    |
-| Bob           | [bob@email.com](mailto:bob@email.com)     | Yes    |
-| Carol         | [carol@email.com](mailto:carol@email.com) | No     |
-
----
-
-## 2. Create **Case Tracker** Sheet
-
-Add a new sheet → rename to **Case Tracker**
-
-| Id | CaseNumber | CreatedDate | Subject | Priority | Status | Assignee |
-| -- | ---------- | ----------- | ------- | -------- | ------ | -------- |
-
-Example:
-
-| Id | CaseNumber | Status | Assignee |
-| -- | ---------- | ------ | -------- |
-| 1  | 1001       | Open   |          |
-| 2  | 1002       | Open   |          |
-| 3  | 1003       | Closed |          |
-
----
-
-## 3. Copy Your Sheet ID
-
-URL format:
-
-```
-https://docs.google.com/spreadsheets/d/<SHEET_ID>/edit#gid=0
-```
-
-Copy only the `<SHEET_ID>`.
-
----
-
-# 🟦 Google Apps Script Web App (Backend API)
-
-This script allows Python to read/write the Google Sheet.
-
----
-
-## 1. Open Apps Script
-
-Inside your Google Sheet:
-
-`Extensions → Apps Script`
-
-Delete all code and paste this:
-
-```javascript
-const SHEET_ID = 'YOUR_SHEET_ID_HERE';
-
-function doGet(e) {
-  try {
-    const sheetName = e.parameter.sheet;
-    if (!sheetName) return asJson_({ error: 'Missing sheet parameter' });
-
-    const ss = SpreadsheetApp.openById(SHEET_ID);
-    const sheet = ss.getSheetByName(sheetName);
-    if (!sheet) return asJson_({ error: 'Sheet not found: ' + sheetName });
-
-    const data = sheet.getDataRange().getValues();
-    return asJson_(data);
-
-  } catch (err) {
-    return asJson_({ error: err.toString() });
-  }
-}
-
-function doPost(e) {
-  try {
-    const body = JSON.parse(e.postData.contents || '{}');
-    const action = body.action;
-
-    const ss = SpreadsheetApp.openById(SHEET_ID);
-
-    if (action === 'updateAssignments') {
-      const sheet = ss.getSheetByName('Case Tracker');
-      if (!sheet) return asJson_({ error: 'Case Tracker not found' });
-
-      const data = sheet.getDataRange().getValues();
-      const header = data[0];
-      const assigneeCol = header.indexOf('Assignee') + 1;
-
-      if (!assigneeCol) return asJson_({ error: 'Assignee column missing' });
-
-      const updates = body.updates || [];
-      updates.forEach(u => {
-        sheet.getRange(u.row, assigneeCol).setValue(u.assignee);
-      });
-
-      return asJson_({ status: 'ok', updated: updates.length });
-    }
-
-    return asJson_({ error: 'Unknown action' });
-
-  } catch (err) {
-    return asJson_({ error: err.toString() });
-  }
-}
-
-function asJson_(obj) {
-  return ContentService
-    .createTextOutput(JSON.stringify(obj))
-    .setMimeType(ContentService.MimeType.JSON);
-}
-```
-
-### Replace:
-
-```javascript
-const SHEET_ID = 'YOUR_SHEET_ID_HERE';
-```
-
-with your actual Sheet ID.
-
----
-
-## 2. Deploy Web App
-
-Go to:
-
-* **Deploy → New Deployment**
-* Select type: **Web App**
-* Execute As: **Me**
-* Who has access: **Anyone**
-* Click **Deploy**
-* Copy the generated **Web App URL**
-
-Example:
-
-```
-https://script.google.com/macros/s/AKfycbx.../exec
-```
-
----
-
-# 🔐 Create `.env` File
-
-Inside your project folder:
-
-```bash
-cat > .env << 'EOF'
-GOOGLE_WEB_APP_URL=https://script.google.com/macros/s/XXXXX/exec
-SENDER_EMAIL=yourgmail@gmail.com
-SENDER_PASSWORD=your_gmail_app_password  # NOT your real password
+GOOGLE_WEB_APP_URL=https://script.google.com/macros/s/xxxx/exec
+SENDER_EMAIL=your-email@example.com
+SENDER_PASSWORD=your-app-password
 SMTP_SERVER=smtp.gmail.com
 SMTP_PORT=587
-EOF
 ```
-
+### Required:
+* **GOOGLE_WEB_APP_URL**: URL of your deployed Apps Script Web App
+* **SENDER_EMAIL**: Gmail/O365/SMTP-compatible email
+* **SENDER_PASSWORD**: App password (not your real login password)
 ---
-
-# 🐍 Python Script (`assign_cases.py`)
-
-Create the file:
-
-```bash
-nano assign_cases.py
+## :arrow_forwards: Running the Bot
+You can run the bot with a single command.
+### **Option 1 — Using the helper script (recommended)**
 ```
-
-Paste this entire script:
-
-```python
-import os
-import itertools
-import requests
-import smtplib
-from email.mime.text import MIMEText
-from dotenv import load_dotenv
-
-load_dotenv()
-
-WEB_APP_URL = os.getenv("GOOGLE_WEB_APP_URL")
-SENDER_EMAIL = os.getenv("SENDER_EMAIL")
-SENDER_PASSWORD = os.getenv("SENDER_PASSWORD")
-SMTP_SERVER = os.getenv("SMTP_SERVER", "smtp.gmail.com")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
-
-
-def fetch_sheet(sheet_name):
-    response = requests.get(WEB_APP_URL, params={"sheet": sheet_name})
-    response.raise_for_status()
-    data = response.json()
-    if isinstance(data, dict) and "error" in data:
-        raise RuntimeError(data["error"])
-    return data
-
-
-def update_assignments(updates):
-    payload = {"action": "updateAssignments", "updates": updates}
-    response = requests.post(WEB_APP_URL, json=payload)
-    response.raise_for_status()
-    return response.json()
-
-
-def send_email(to_email, case_number, subject):
-    msg = MIMEText(
-        f"You have been assigned a new case.\n\nCase: {case_number}\nSubject: {subject}"
-    )
-    msg["Subject"] = f"New Case Assigned: {case_number}"
-    msg["From"] = SENDER_EMAIL
-    msg["To"] = to_email
-
-    with smtplib.SMTP(SMTP_SERVER, SMTP_PORT) as server:
-        server.starttls()
-        server.login(SENDER_EMAIL, SENDER_PASSWORD)
-        server.send_message(msg)
-
-
-def to_dict(rows):
-    header = rows[0]
-    return header, [dict(zip(header, row)) for row in rows[1:]]
-
-
-def main():
-    print("Fetching roster...")
-    roster_raw = fetch_sheet("Roster")
-    header, roster = to_dict(roster_raw)
-
-    active = [r for r in roster if str(r.get("Active", "")).lower() == "yes"]
-
-    print("Fetching cases...")
-    case_raw = fetch_sheet("Case Tracker")
-    chead, cases = to_dict(case_raw)
-
-    unassigned = []
-    for i, case in enumerate(cases, start=2):
-        if case["Status"].lower() == "open" and case["Assignee"] == "":
-            unassigned.append((i, case))
-
-    cycle = itertools.cycle(active)
-    updates = []
-
-    for row, case in unassigned:
-        employee = next(cycle)
-        email = employee["Email"]
-
-        print(f"Assigning {case['CaseNumber']} → {employee['Employee Name']}")
-
-        updates.append({"row": row, "assignee": email})
-        send_email(email, case["CaseNumber"], case["Subject"])
-
-    if updates:
-        print("Pushing updates to Google Sheets...")
-        print(update_assignments(updates))
-    else:
-        print("No unassigned cases.")
-
-
-if __name__ == "__main__":
-    main()
+./run.sh
 ```
-
----
-
-# ▶️ How to Run
-
-From your project folder:
-
-```bash
-cd ~/case-assignment-bot
-source venv/bin/activategi
+(If needed: `chmod +x run.sh`)
+This script will:
+* Activate/create virtual environment
+* Install dependencies
+* Validate `.env`
+* Run `assign_cases.py`
+### **Option 2 — Running Python directly**
+```
+source venv/bin/activate
 python assign_cases.py
 ```
-
 ---
-
-# ✔️ Expected Output
-
-Terminal will show:
-
+## :outbox_tray: What Happens When You Run It
+### :heavy_tick: Fetches roster and cases
+The bot retrieves:
+* All employees
+* All cases
+from Google Sheets via your Web App.
+### :heavy_tick: Filters relevant data
+It selects:
+* Active employees (`Active = Yes`)
+* Open cases without an assignee
+### :heavy_tick: Assigns cases
+Cases are distributed evenly using a **round-robin algorithm**.
+### :heavy_tick: Updates Google Sheets
+Each assigned case is written back into the **Assignee** column.
+### :heavy_tick: Sends email notifications
+Each employee gets an email with:
+* Case Number
+* Subject
+* Basic details
+---
+## :chart_with_upwards_trend: Example Output (Console)
 ```
 Fetching roster...
-Fetching cases...
+Found 3 active employees.
+Fetching case tracker...
+Unassigned cases: 2
 Assigning 1001 → Alice
 Assigning 1002 → Bob
-Pushing updates to Google Sheets...
+Updating assignments...
 {'status': 'ok', 'updated': 2}
+Done.
 ```
-
 ---
-
-# 📊 What You Should See in Google Sheets
-
-### Before running:
-
+## :bar_chart: Example Result (Google Sheets)
+Before:
 | CaseNumber | Status | Assignee |
 | ---------- | ------ | -------- |
 | 1001       | Open   |          |
 | 1002       | Open   |          |
-
-### After running:
-
-| CaseNumber | Status | Assignee                                  |
-| ---------- | ------ | ----------------------------------------- |
-| 1001       | Open   | [alice@email.com](mailto:alice@email.com) |
-| 1002       | Open   | [bob@email.com](mailto:bob@email.com)     |
-
+After:
+| CaseNumber | Status | Assignee                                      |
+| ---------- | ------ | --------------------------------------------- |
+| 1001       | Open   | [alice@example.com](mailto:alice@example.com) |
+| 1002       | Open   | [bob@example.com](mailto:bob@example.com)     |
 ---
-
-# 📧 Email Notifications
-
-Each assigned employee receives:
-
-**Subject:**
-`New Case Assigned: 1001`
-
-**Body:**
-
-```
-You have been assigned a new case.
-
-Case: 1001
-Subject: Login issue
-```
-
+## :insect: Troubleshooting
+### :x: 500 Internal Server Error
+Your `GOOGLE_WEB_APP_URL` is incorrect or the Apps Script deployment is wrong.
+### :x: No emails received
+You must use an **app password**, not a normal login password.
+### :x: “ScriptError: Access denied”
+Your Web App must be deployed with:
+**Who has access:** Anyone
 ---
-
-# ❗ Troubleshooting
-
-### ❌ Python shows
-
-`500 Internal Server Error`
-
-➡️ Your `.env` still uses the placeholder URL:
-`https://script.google.com/macros/s/XXXX/exec`
-
-Fix by pasting the real Web App URL.
-
----
-
-### ❌ Browser shows
-
-`ScriptError: Access denied`
-
-Fix:
-
-Apps Script → Deploy → Manage deployments →
-Set *Who has access* to: **Anyone**
-
----
-
-### ❌ No emails are received
-
-Gmail requires an **App Password**.
-
-Follow this:
-
-1. Enable 2-Step Verification
-2. Go to [https://myaccount.google.com/apppasswords](https://myaccount.google.com/apppasswords)
-3. Generate an app password
-4. Put it into `.env`
-
----
-
-# 🎯 Done!
-
-You now have a fully functional automation system:
-
-* Google Sheets backend
-* Apps Script API
-* Python assignment engine
-* Email notification system
-
-If you want, I can also create:
-
-✅ A visual architecture diagram
-✅ A cron job automation guide
-✅ A GUI dashboard
-✅ Docker version of the project
-
-Just tell me!
-
+## :page_facing_up: License
+MIT License — free for personal and commercial use.
