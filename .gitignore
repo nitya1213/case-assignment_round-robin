@@ -1,0 +1,57 @@
+# -----------------------------
+# Python virtual environment
+# -----------------------------
+venv/
+ENV/
+env/
+.venv/
+
+# -----------------------------
+# Environment / Secret files
+# -----------------------------
+.env
+*.env
+
+# -----------------------------
+# Python cache
+# -----------------------------
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pdb
+
+# Byte-compiled / optimized / DLL files
+*.so
+*.dll
+*.dylib
+
+# -----------------------------
+# Logs & runtime files
+# -----------------------------
+*.log
+*.out
+*.err
+
+# -----------------------------
+# OS-generated files
+# -----------------------------
+.DS_Store
+Thumbs.db
+
+# -----------------------------
+# Editor / IDE files
+# -----------------------------
+# VSCode
+.vscode/
+
+# PyCharm / JetBrains
+.idea/
+
+# -----------------------------
+# Backup / temp files
+# -----------------------------
+*.swp
+*.swo
+*~
+.#*
